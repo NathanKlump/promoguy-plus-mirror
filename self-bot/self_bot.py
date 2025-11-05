@@ -12,66 +12,83 @@ env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
 DISCORD_TOKEN_SELF = os.getenv("DISCORD_TOKEN_SELF")
-TARGET_INPUT_CHANNEL_ID = int(os.getenv("TARGET_INPUT_CHANNEL_ID", "0"))
+# Support comma-separated channel IDs
+TARGET_INPUT_CHANNEL_IDS = os.getenv("TARGET_INPUT_CHANNEL_IDS", "")
 FLASK_ENDPOINT = os.getenv("FLASK_ENDPOINT", "http://localhost:5001/receive_message")
+
+# Parse channel IDs from comma-separated string
+def parse_channel_ids(channel_ids_str):
+    """Parse comma-separated channel IDs into a set of integers."""
+    if not channel_ids_str:
+        return set()
+    
+    channel_ids = set()
+    for id_str in channel_ids_str.split(','):
+        id_str = id_str.strip()
+        if id_str.isdigit():
+            channel_ids.add(int(id_str))
+    return channel_ids
 
 # -------------------------------------------------------------------
 # Discord client definition
 # -------------------------------------------------------------------
 class MessageLogger(discord.Client):
-    def __init__(self, target_channel_id, webhook_url):
+    def __init__(self, target_channel_ids, webhook_url):
         intents = discord.Intents.default()
         intents.messages = True
         intents.message_content = True
         super().__init__(intents=intents)
-        self.target_channel_id = target_channel_id
+        self.target_channel_ids = target_channel_ids
         self.webhook_url = webhook_url
-    
+
     async def on_ready(self):
         print(f'Logged in as: {self.user}')
         print(f'User ID: {self.user.id}')
         print('-' * 50)
         
-        # Try to find and display the target channel info
-        channel = self.get_channel(self.target_channel_id)
-        if channel:
-            print(f'Monitoring channel: #{channel.name}')
-            if hasattr(channel, 'guild'):
-                print(f'Server: {channel.guild.name}')
-        else:
-            print(f'Monitoring channel ID: {self.target_channel_id}')
-            print('(Channel not found - make sure the ID is correct)')
+        # Display info for all target channels
+        print(f'Monitoring {len(self.target_channel_ids)} channel(s):')
+        for channel_id in self.target_channel_ids:
+            channel = self.get_channel(channel_id)
+            if channel:
+                if hasattr(channel, 'guild'):
+                    print(f'  • #{channel.name} (ID: {channel_id}) in {channel.guild.name}')
+                else:
+                    print(f'  • #{channel.name} (ID: {channel_id})')
+            else:
+                print(f'  • Channel ID: {channel_id} (not found - check ID and bot access)')
         
         print('-' * 50)
         print('Listening for messages...\n')
-    
+
     async def on_message(self, message):
-        # Only log messages from the target channel
-        if message.channel.id != self.target_channel_id:
+        # Only log messages from target channels
+        if message.channel.id not in self.target_channel_ids:
             return
-        
+
         # Get timestamp
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
+
         # Prepare message data
         message_data = {
             'timestamp': timestamp,
+            'channel_id': message.channel.id,
             'channel_name': message.channel.name,
             'author': str(message.author),
             'content': message.content,
             'attachments': [att.url for att in message.attachments],
             'embed_count': len(message.embeds)
         }
-        
+
         # Log locally
-        print(f'[{timestamp}] #{message.channel.name}')
+        print(f'[{timestamp}] #{message.channel.name} (ID: {message.channel.id})')
         print(f'{message.author}: {message.content}')
         if message.attachments:
             print(f'Attachments: {", ".join(message_data["attachments"])}')
         if message.embeds:
             print(f'Embeds: {message_data["embed_count"]} embed(s)')
         print('-' * 50)
-        
+
         # Forward to Flask endpoint
         try:
             response = requests.post(self.webhook_url, json=message_data, timeout=5)
@@ -84,7 +101,6 @@ class MessageLogger(discord.Client):
         
         print('-' * 50)
 
-
 # -------------------------------------------------------------------
 # Run the client
 # -------------------------------------------------------------------
@@ -93,8 +109,16 @@ if __name__ == '__main__':
     print('WARNING: Automating user accounts is against Discord ToS')
     print('Use at your own risk!\n')
     
+    # Parse channel IDs
+    channel_ids = parse_channel_ids(TARGET_INPUT_CHANNEL_IDS)
+    
+    if not channel_ids:
+        print('ERROR: No valid channel IDs found in TARGET_INPUT_CHANNEL_IDS')
+        print('Please set TARGET_INPUT_CHANNEL_IDS in your .env file (comma-separated)')
+        exit(1)
+    
     client = MessageLogger(
-        target_channel_id=TARGET_INPUT_CHANNEL_ID,
+        target_channel_ids=channel_ids,
         webhook_url=FLASK_ENDPOINT
     )
     client.run(DISCORD_TOKEN_SELF)
