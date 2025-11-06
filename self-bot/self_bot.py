@@ -67,6 +67,16 @@ class MessageLogger(discord.Client):
         # Get timestamp
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+        # Prepare attachment data with more details
+        attachments = []
+        for att in message.attachments:
+            attachments.append({
+                'url': att.url,
+                'filename': att.filename,
+                'size': att.size,
+                'content_type': att.content_type
+            })
+
         # Prepare message data
         message_data = {
             'timestamp': timestamp,
@@ -74,7 +84,7 @@ class MessageLogger(discord.Client):
             'channel_name': message.channel.name,
             'author': str(message.author),
             'content': message.content,
-            'attachments': [att.url for att in message.attachments],
+            'attachments': attachments,
             'embed_count': len(message.embeds)
         }
 
@@ -82,7 +92,8 @@ class MessageLogger(discord.Client):
         print(f'[{timestamp}] #{message.channel.name} (ID: {message.channel.id})')
         print(f'{message.author}: {message.content}')
         if message.attachments:
-            print(f'Attachments: {", ".join(message_data["attachments"])}')
+            for att in attachments:
+                print(f'Attachment: {att["filename"]} ({att["content_type"]}) - {att["url"]}')
         if message.embeds:
             print(f'Embeds: {message_data["embed_count"]} embed(s)')
         print('-' * 50)

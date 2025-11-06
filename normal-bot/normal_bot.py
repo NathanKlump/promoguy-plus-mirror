@@ -3,6 +3,8 @@ import discord
 from flask import Flask, request, jsonify
 import threading
 import asyncio
+import aiohttp
+from io import BytesIO
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -47,8 +49,6 @@ def receive_message():
         formatted_message = f"**[{timestamp}]** #{channel_name}\n"
         formatted_message += f"**{author}:** {content}"
 
-        if attachments:
-            formatted_message += f"\n📎 Attachments: {len(attachments)}"
         if embed_count > 0:
             formatted_message += f"\n📊 Embeds: {embed_count}"
 
@@ -58,7 +58,12 @@ def receive_message():
         print(f'Author: {author}')
         print(f'Content: {content}')
         if attachments:
-            print(f'Attachments: {", ".join(attachments)}')
+            print(f'Attachments: {len(attachments)} file(s)')
+            for att in attachments:
+                if isinstance(att, dict):
+                    print(f'  - {att.get("filename", "unknown")} ({att.get("content_type", "unknown")})')
+                else:
+                    print(f'  - {att}')
         if embed_count > 0:
             print(f'Embeds: {embed_count}')
         print('-' * 50)
@@ -66,7 +71,7 @@ def receive_message():
         # Send to Discord channel if configured
         if TARGET_OUTPUT_CHANNEL_ID:
             asyncio.run_coroutine_threadsafe(
-                send_to_discord(formatted_message),
+                send_to_discord(formatted_message, attachments),
                 client.loop
             )
 
@@ -77,21 +82,69 @@ def receive_message():
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-async def send_to_discord(message):
-    """Send message to Discord channel"""
-    if TARGET_OUTPUT_CHANNEL_ID:
-        channel = client.get_channel(TARGET_OUTPUT_CHANNEL_ID)
-        if channel:
-            try:
-                # Split message if too long (Discord has 2000 char limit)
-                if len(message) > 2000:
-                    chunks = [message[i:i + 2000] for i in range(0, len(message), 2000)]
-                    for chunk in chunks:
-                        await channel.send(chunk)
-                else:
-                    await channel.send(message)
-            except Exception as e:
-                print(f'Error sending to Discord: {e}')
+async def download_attachment(session, attachment):
+    """Download an attachment and return it as a Discord File object"""
+    try:
+        # Handle both dict format (new) and string format (old)
+        if isinstance(attachment, dict):
+            url = attachment.get('url')
+            filename = attachment.get('filename', 'attachment')
+        else:
+            url = attachment
+            filename = url.split('/')[-1].split('?')[0]  # Extract filename from URL
+        
+        async with session.get(url) as response:
+            if response.status == 200:
+                data = await response.read()
+                return discord.File(BytesIO(data), filename=filename)
+            else:
+                print(f'Failed to download attachment: {response.status}')
+                return None
+    except Exception as e:
+        print(f'Error downloading attachment: {e}')
+        return None
+
+
+async def send_to_discord(message, attachments=None):
+    """Send message to Discord channel with attachments"""
+    if not TARGET_OUTPUT_CHANNEL_ID:
+        return
+        
+    channel = client.get_channel(TARGET_OUTPUT_CHANNEL_ID)
+    if not channel:
+        print(f'Channel {TARGET_OUTPUT_CHANNEL_ID} not found')
+        return
+    
+    try:
+        # Split message if too long (Discord has 2000 char limit)
+        if len(message) > 2000:
+            message = message[:1997] + "..."
+        
+        # Download attachments if any
+        files = []
+        if attachments:
+            async with aiohttp.ClientSession() as session:
+                for attachment in attachments:
+                    file = await download_attachment(session, attachment)
+                    if file:
+                        files.append(file)
+        
+        # Send message with attachments
+        if files:
+            # Discord allows up to 10 files per message
+            if len(files) <= 10:
+                await channel.send(content=message, files=files)
+            else:
+                # Send in batches if more than 10 files
+                await channel.send(content=message)
+                for i in range(0, len(files), 10):
+                    batch = files[i:i+10]
+                    await channel.send(files=batch)
+        else:
+            await channel.send(message)
+            
+    except Exception as e:
+        print(f'Error sending to Discord: {e}')
 
 
 @client.event
