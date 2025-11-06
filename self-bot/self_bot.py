@@ -34,10 +34,8 @@ def parse_channel_ids(channel_ids_str):
 # -------------------------------------------------------------------
 class MessageLogger(discord.Client):
     def __init__(self, target_channel_ids, webhook_url):
-        intents = discord.Intents.default()
-        intents.messages = True
-        intents.message_content = True
-        super().__init__(intents=intents)
+        # For discord.py-self - no intents parameter needed
+        super().__init__()
         self.target_channel_ids = target_channel_ids
         self.webhook_url = webhook_url
 
