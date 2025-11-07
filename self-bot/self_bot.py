@@ -29,6 +29,80 @@ def parse_channel_ids(channel_ids_str):
             channel_ids.add(int(id_str))
     return channel_ids
 
+def extract_embed_data(embed):
+    """Extract all relevant data from a Discord embed."""
+    embed_data = {}
+    
+    # Basic embed properties
+    if embed.title:
+        embed_data['title'] = embed.title
+    if embed.description:
+        embed_data['description'] = embed.description
+    if embed.url:
+        embed_data['url'] = embed.url
+    if embed.color:
+        embed_data['color'] = embed.color.value
+    if embed.timestamp:
+        embed_data['timestamp'] = embed.timestamp.isoformat()
+    
+    # Footer
+    if embed.footer:
+        embed_data['footer'] = {
+            'text': embed.footer.text,
+            'icon_url': embed.footer.icon_url if embed.footer.icon_url else None
+        }
+    
+    # Image
+    if embed.image:
+        embed_data['image'] = {
+            'url': embed.image.url,
+            'width': embed.image.width,
+            'height': embed.image.height
+        }
+    
+    # Thumbnail
+    if embed.thumbnail:
+        embed_data['thumbnail'] = {
+            'url': embed.thumbnail.url,
+            'width': embed.thumbnail.width,
+            'height': embed.thumbnail.height
+        }
+    
+    # Author
+    if embed.author:
+        embed_data['author'] = {
+            'name': embed.author.name,
+            'url': embed.author.url if embed.author.url else None,
+            'icon_url': embed.author.icon_url if embed.author.icon_url else None
+        }
+    
+    # Fields
+    if embed.fields:
+        embed_data['fields'] = []
+        for field in embed.fields:
+            embed_data['fields'].append({
+                'name': field.name,
+                'value': field.value,
+                'inline': field.inline
+            })
+    
+    # Video (if present)
+    if embed.video:
+        embed_data['video'] = {
+            'url': embed.video.url,
+            'width': embed.video.width,
+            'height': embed.video.height
+        }
+    
+    # Provider (e.g., YouTube, Twitter)
+    if embed.provider:
+        embed_data['provider'] = {
+            'name': embed.provider.name,
+            'url': embed.provider.url if embed.provider.url else None
+        }
+    
+    return embed_data
+
 # -------------------------------------------------------------------
 # Discord client definition
 # -------------------------------------------------------------------
@@ -77,6 +151,11 @@ class MessageLogger(discord.Client):
                 'content_type': att.content_type
             })
 
+        # Extract embed data
+        embeds = []
+        for embed in message.embeds:
+            embeds.append(extract_embed_data(embed))
+
         # Prepare message data
         message_data = {
             'timestamp': timestamp,
@@ -85,7 +164,7 @@ class MessageLogger(discord.Client):
             'author': str(message.author),
             'content': message.content,
             'attachments': attachments,
-            'embed_count': len(message.embeds)
+            'embeds': embeds
         }
 
         # Log locally
@@ -95,7 +174,16 @@ class MessageLogger(discord.Client):
             for att in attachments:
                 print(f'Attachment: {att["filename"]} ({att["content_type"]}) - {att["url"]}')
         if message.embeds:
-            print(f'Embeds: {message_data["embed_count"]} embed(s)')
+            print(f'Embeds: {len(embeds)} embed(s)')
+            for i, embed in enumerate(embeds, 1):
+                print(f'  Embed {i}:')
+                if 'title' in embed:
+                    print(f'    Title: {embed["title"]}')
+                if 'description' in embed:
+                    desc_preview = embed["description"][:100] + '...' if len(embed["description"]) > 100 else embed["description"]
+                    print(f'    Description: {desc_preview}')
+                if 'image' in embed:
+                    print(f'    Image: {embed["image"]["url"]}')
         print('-' * 50)
 
         # Forward to Flask endpoint

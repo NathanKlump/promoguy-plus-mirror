@@ -31,6 +31,60 @@ intents.message_content = True
 intents.messages = True
 client = discord.Client(intents=intents)
 
+def create_discord_embed(embed_data):
+    """Convert embed data dict to Discord Embed object"""
+    embed = discord.Embed()
+    
+    # Basic properties
+    if 'title' in embed_data:
+        embed.title = embed_data['title']
+    if 'description' in embed_data:
+        embed.description = embed_data['description']
+    if 'url' in embed_data:
+        embed.url = embed_data['url']
+    if 'color' in embed_data:
+        embed.color = discord.Color(embed_data['color'])
+    if 'timestamp' in embed_data:
+        # Parse ISO format timestamp
+        from datetime import datetime
+        embed.timestamp = datetime.fromisoformat(embed_data['timestamp'].replace('Z', '+00:00'))
+    
+    # Footer
+    if 'footer' in embed_data:
+        footer = embed_data['footer']
+        embed.set_footer(
+            text=footer.get('text', ''),
+            icon_url=footer.get('icon_url')
+        )
+    
+    # Image
+    if 'image' in embed_data:
+        embed.set_image(url=embed_data['image']['url'])
+    
+    # Thumbnail
+    if 'thumbnail' in embed_data:
+        embed.set_thumbnail(url=embed_data['thumbnail']['url'])
+    
+    # Author
+    if 'author' in embed_data:
+        author = embed_data['author']
+        embed.set_author(
+            name=author.get('name', ''),
+            url=author.get('url'),
+            icon_url=author.get('icon_url')
+        )
+    
+    # Fields
+    if 'fields' in embed_data:
+        for field in embed_data['fields']:
+            embed.add_field(
+                name=field.get('name', '\u200b'),
+                value=field.get('value', '\u200b'),
+                inline=field.get('inline', False)
+            )
+    
+    return embed
+
 @app.route('/receive_message', methods=['POST'])
 def receive_message():
     """Endpoint to receive messages from the self bot"""
@@ -43,14 +97,11 @@ def receive_message():
         author = data.get('author', 'Unknown')
         content = data.get('content', '')
         attachments = data.get('attachments', [])
-        embed_count = data.get('embed_count', 0)
+        embeds = data.get('embeds', [])
 
         # Format the message
         formatted_message = f"**[{timestamp}]** #{channel_name}\n"
         formatted_message += f"**{author}:** {content}"
-
-        if embed_count > 0:
-            formatted_message += f"\n📊 Embeds: {embed_count}"
 
         # Print to console
         print(f'\n[RECEIVED] {timestamp}')
@@ -64,14 +115,18 @@ def receive_message():
                     print(f'  - {att.get("filename", "unknown")} ({att.get("content_type", "unknown")})')
                 else:
                     print(f'  - {att}')
-        if embed_count > 0:
-            print(f'Embeds: {embed_count}')
+        if embeds:
+            print(f'Embeds: {len(embeds)} embed(s)')
+            for i, embed in enumerate(embeds, 1):
+                print(f'  Embed {i}:')
+                if 'title' in embed:
+                    print(f'    Title: {embed["title"]}')
         print('-' * 50)
 
         # Send to Discord channel if configured
         if TARGET_OUTPUT_CHANNEL_ID:
             asyncio.run_coroutine_threadsafe(
-                send_to_discord(formatted_message, attachments),
+                send_to_discord(formatted_message, attachments, embeds),
                 client.loop
             )
 
@@ -105,8 +160,8 @@ async def download_attachment(session, attachment):
         return None
 
 
-async def send_to_discord(message, attachments=None):
-    """Send message to Discord channel with attachments"""
+async def send_to_discord(message, attachments=None, embeds=None):
+    """Send message to Discord channel with attachments and embeds"""
     if not TARGET_OUTPUT_CHANNEL_ID:
         return
         
@@ -129,18 +184,49 @@ async def send_to_discord(message, attachments=None):
                     if file:
                         files.append(file)
         
-        # Send message with attachments
-        if files:
-            # Discord allows up to 10 files per message
+        # Create Discord embed objects
+        discord_embeds = []
+        if embeds:
+            for embed_data in embeds:
+                try:
+                    discord_embed = create_discord_embed(embed_data)
+                    discord_embeds.append(discord_embed)
+                except Exception as e:
+                    print(f'Error creating embed: {e}')
+        
+        # Discord limits: 10 embeds per message, 10 files per message
+        # Send message with embeds and attachments
+        if files or discord_embeds:
+            # Limit embeds to 10 per message (Discord limit)
+            embeds_to_send = discord_embeds[:10]
+            remaining_embeds = discord_embeds[10:]
+            
+            # Limit files to 10 per message (Discord limit)
             if len(files) <= 10:
-                await channel.send(content=message, files=files)
+                await channel.send(
+                    content=message if message.strip() else None,
+                    files=files,
+                    embeds=embeds_to_send
+                )
             else:
-                # Send in batches if more than 10 files
-                await channel.send(content=message)
-                for i in range(0, len(files), 10):
+                # Send first batch with message and embeds
+                await channel.send(
+                    content=message if message.strip() else None,
+                    files=files[:10],
+                    embeds=embeds_to_send
+                )
+                # Send remaining files in batches
+                for i in range(10, len(files), 10):
                     batch = files[i:i+10]
                     await channel.send(files=batch)
+            
+            # Send remaining embeds if any
+            if remaining_embeds:
+                for i in range(0, len(remaining_embeds), 10):
+                    batch = remaining_embeds[i:i+10]
+                    await channel.send(embeds=batch)
         else:
+            # Just send the text message
             await channel.send(message)
             
     except Exception as e:
