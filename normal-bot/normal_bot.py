@@ -4,6 +4,7 @@ from flask import Flask, request, jsonify
 import threading
 import asyncio
 import aiohttp
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from dotenv import load_dotenv
@@ -99,12 +100,17 @@ def receive_message():
         attachments = data.get('attachments', [])
         embeds = data.get('embeds', [])
 
-        # Format the message
-        formatted_message = f"**[{timestamp}]** #{channel_name}\n"
-        formatted_message += f"**{author}:** {content}"
+        try:
+            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            formatted_time = dt.strftime("%b: %d %I:%M%p").lower()
+        except Exception:
+            formatted_time = timestamp  # fallback if not ISO formatted
 
-        # Print to console
-        print(f'\n[RECEIVED] {timestamp}')
+        # New clean Discord message style
+        formatted_message = f"`[{formatted_time}] #{channel_name}`\n{content}"
+
+        # Print to console for debug/logging
+        print(f'\n[RECEIVED] {formatted_time}')
         print(f'Channel: #{channel_name}')
         print(f'Author: {author}')
         print(f'Content: {content}')
