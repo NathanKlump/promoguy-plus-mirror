@@ -8,6 +8,7 @@ from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from dotenv import load_dotenv
+import re
 
 # -------------------------------------------------------------------
 # Load environment variables
@@ -106,8 +107,12 @@ def receive_message():
         except Exception:
             formatted_time = timestamp  # fallback if not ISO formatted
 
+        # Parse custom emojis to text format
+        # Convert custom emoji format <:name:id> or <a:name:id> to :name:
+        content_parsed = re.sub(r'<a?:(\w+):\d+>', r':\1:', content)
+        
         # New clean Discord message style
-        formatted_message = f"`[{formatted_time}] #{channel_name}`\n{content}"
+        formatted_message = f"`[{formatted_time}] #{channel_name}`\n{content_parsed}"
 
         # Print to console for debug/logging
         print(f'\n[RECEIVED] {formatted_time}')
