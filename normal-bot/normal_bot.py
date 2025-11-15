@@ -17,7 +17,13 @@ env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN_NORMAL")  # token for normal bot
-TARGET_OUTPUT_CHANNEL_ID = int(os.getenv("TARGET_OUTPUT_CHANNEL_ID", "0"))
+# Parse comma-separated list of channel IDs
+TARGET_OUTPUT_CHANNEL_IDS_STR = os.getenv("TARGET_OUTPUT_CHANNEL_IDS", "")
+TARGET_OUTPUT_CHANNEL_IDS = [
+    int(cid.strip()) 
+    for cid in TARGET_OUTPUT_CHANNEL_IDS_STR.split(",") 
+    if cid.strip().isdigit()
+]
 FLASK_PORT = int(os.getenv("FLASK_PORT", "5001"))  # default to 5001 if not set
 
 # -------------------------------------------------------------------
@@ -134,10 +140,10 @@ def receive_message():
                     print(f'    Title: {embed["title"]}')
         print('-' * 50)
 
-        # Send to Discord channel if configured
-        if TARGET_OUTPUT_CHANNEL_ID:
+        # Send to Discord channels if configured
+        if TARGET_OUTPUT_CHANNEL_IDS:
             asyncio.run_coroutine_threadsafe(
-                send_to_discord(formatted_message, attachments, embeds),
+                send_to_discord_channels(formatted_message, attachments, embeds),
                 client.loop
             )
 
@@ -171,58 +177,32 @@ async def download_attachment(session, attachment):
         return None
 
 
-async def send_to_discord(message, attachments=None, embeds=None):
-    """Send message to Discord channel with attachments and embeds"""
-    if not TARGET_OUTPUT_CHANNEL_ID:
-        return
-        
-    channel = client.get_channel(TARGET_OUTPUT_CHANNEL_ID)
-    if not channel:
-        print(f'Channel {TARGET_OUTPUT_CHANNEL_ID} not found')
-        return
-    
+async def send_to_discord_channel(channel, message, files, embeds):
+    """Send message to a single Discord channel with attachments and embeds"""
     try:
         # Split message if too long (Discord has 2000 char limit)
+        msg_to_send = message
         if len(message) > 2000:
-            message = message[:1997] + "..."
-        
-        # Download attachments if any
-        files = []
-        if attachments:
-            async with aiohttp.ClientSession() as session:
-                for attachment in attachments:
-                    file = await download_attachment(session, attachment)
-                    if file:
-                        files.append(file)
-        
-        # Create Discord embed objects
-        discord_embeds = []
-        if embeds:
-            for embed_data in embeds:
-                try:
-                    discord_embed = create_discord_embed(embed_data)
-                    discord_embeds.append(discord_embed)
-                except Exception as e:
-                    print(f'Error creating embed: {e}')
+            msg_to_send = message[:1997] + "..."
         
         # Discord limits: 10 embeds per message, 10 files per message
         # Send message with embeds and attachments
-        if files or discord_embeds:
+        if files or embeds:
             # Limit embeds to 10 per message (Discord limit)
-            embeds_to_send = discord_embeds[:10]
-            remaining_embeds = discord_embeds[10:]
+            embeds_to_send = embeds[:10]
+            remaining_embeds = embeds[10:]
             
             # Limit files to 10 per message (Discord limit)
             if len(files) <= 10:
                 await channel.send(
-                    content=message if message.strip() else None,
+                    content=msg_to_send if msg_to_send.strip() else None,
                     files=files,
                     embeds=embeds_to_send
                 )
             else:
                 # Send first batch with message and embeds
                 await channel.send(
-                    content=message if message.strip() else None,
+                    content=msg_to_send if msg_to_send.strip() else None,
                     files=files[:10],
                     embeds=embeds_to_send
                 )
@@ -238,23 +218,68 @@ async def send_to_discord(message, attachments=None, embeds=None):
                     await channel.send(embeds=batch)
         else:
             # Just send the text message
-            await channel.send(message)
+            await channel.send(msg_to_send)
             
     except Exception as e:
-        print(f'Error sending to Discord: {e}')
+        print(f'Error sending to Discord channel {channel.id}: {e}')
+
+
+async def send_to_discord_channels(message, attachments=None, embeds=None):
+    """Send message to all configured Discord channels with attachments and embeds"""
+    if not TARGET_OUTPUT_CHANNEL_IDS:
+        return
+    
+    # Download attachments once
+    files_data = []
+    if attachments:
+        async with aiohttp.ClientSession() as session:
+            for attachment in attachments:
+                file = await download_attachment(session, attachment)
+                if file:
+                    files_data.append(file)
+    
+    # Create Discord embed objects once
+    discord_embeds = []
+    if embeds:
+        for embed_data in embeds:
+            try:
+                discord_embed = create_discord_embed(embed_data)
+                discord_embeds.append(discord_embed)
+            except Exception as e:
+                print(f'Error creating embed: {e}')
+    
+    # Send to each channel
+    for channel_id in TARGET_OUTPUT_CHANNEL_IDS:
+        channel = client.get_channel(channel_id)
+        if not channel:
+            print(f'Channel {channel_id} not found')
+            continue
+        
+        # For files, we need to create new File objects for each channel
+        # because Discord.File objects can only be sent once
+        channel_files = []
+        if files_data:
+            for file in files_data:
+                # Reset file pointer and create new File object
+                file.fp.seek(0)
+                channel_files.append(discord.File(file.fp, filename=file.filename))
+        
+        await send_to_discord_channel(channel, message, channel_files, discord_embeds)
 
 
 @client.event
 async def on_ready():
     print(f'Discord bot logged in as {client.user}')
-    if TARGET_OUTPUT_CHANNEL_ID:
-        channel = client.get_channel(TARGET_OUTPUT_CHANNEL_ID)
-        if channel:
-            print(f'Output channel: #{channel.name}')
-        else:
-            print(f'Warning: Output channel {TARGET_OUTPUT_CHANNEL_ID} not found')
+    if TARGET_OUTPUT_CHANNEL_IDS:
+        print(f'Output channels ({len(TARGET_OUTPUT_CHANNEL_IDS)}):')
+        for channel_id in TARGET_OUTPUT_CHANNEL_IDS:
+            channel = client.get_channel(channel_id)
+            if channel:
+                print(f'  - #{channel.name} (ID: {channel_id})')
+            else:
+                print(f'  - Channel ID {channel_id} (not found)')
     else:
-        print('Warning: No output channel configured')
+        print('Warning: No output channels configured')
     print('-' * 50)
 
 
