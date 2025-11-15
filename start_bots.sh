@@ -1,5 +1,4 @@
 #!/bin/bash
-
 # Bot Manager Script
 # Usage: ./manage_bots.sh [start|stop] [random]
 
@@ -22,19 +21,17 @@ start_bots() {
     echo "Starting bots..."
     random_delay "$@"
     
-    # Clear old logs and start self-bot
+    # Start self-bot
     echo "Starting self-bot..."
     cd "$SELF_BOT_DIR"
-    > "$SCRIPT_DIR/self-bot.log"  # Truncate log file
-    nohup ./venv/bin/python self_bot.py >> "$SCRIPT_DIR/self-bot.log" 2>&1 &
+    nohup ./venv/bin/python self_bot.py > /dev/null 2>&1 &
     SELF_BOT_PID=$!
     echo "Self-bot started with PID: $SELF_BOT_PID"
     
-    # Clear old logs and start normal-bot
+    # Start normal-bot
     echo "Starting normal-bot..."
     cd "$NORMAL_BOT_DIR"
-    > "$SCRIPT_DIR/normal-bot.log"  # Truncate log file
-    nohup ./venv/bin/python normal_bot.py >> "$SCRIPT_DIR/normal-bot.log" 2>&1 &
+    nohup ./venv/bin/python normal_bot.py > /dev/null 2>&1 &
     NORMAL_BOT_PID=$!
     echo "Normal-bot started with PID: $NORMAL_BOT_PID"
     
@@ -43,7 +40,6 @@ start_bots() {
     echo "$NORMAL_BOT_PID" >> "$PID_FILE"
     
     echo "Both bots started successfully!"
-    echo "Logs: self-bot.log and normal-bot.log"
 }
 
 # Function to stop bots
@@ -134,5 +130,3 @@ case "$1" in
         exit 1
         ;;
 esac
-
-
