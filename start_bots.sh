@@ -6,6 +6,35 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF_BOT_DIR="$SCRIPT_DIR/self-bot"
 NORMAL_BOT_DIR="$SCRIPT_DIR/normal-bot"
 PID_FILE="$SCRIPT_DIR/.bot_pids"
+LOCK_FILE="$SCRIPT_DIR/.bot_manager.lock"
+
+# Function to acquire lock
+acquire_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        local lock_pid=$(cat "$LOCK_FILE")
+        # Check if the process that created the lock is still running
+        if kill -0 "$lock_pid" 2>/dev/null; then
+            echo "Error: Another instance of this script is already running (PID: $lock_pid)"
+            echo "If you're sure no other instance is running, remove: $LOCK_FILE"
+            exit 1
+        else
+            # Stale lock file, remove it
+            echo "Removing stale lock file..."
+            rm "$LOCK_FILE"
+        fi
+    fi
+    
+    # Create lock file with current PID
+    echo $$ > "$LOCK_FILE"
+}
+
+# Function to release lock
+release_lock() {
+    rm -f "$LOCK_FILE"
+}
+
+# Trap to ensure lock is released on exit
+trap release_lock EXIT INT TERM
 
 # Function to generate random delay (0 to 3600 seconds = 1 hour)
 random_delay() {
@@ -94,6 +123,9 @@ check_status() {
         rm "$PID_FILE"
     fi
 }
+
+# Acquire lock before proceeding
+acquire_lock
 
 # Main script logic
 case "$1" in
