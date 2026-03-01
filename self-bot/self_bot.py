@@ -203,8 +203,6 @@ class MessageLogger(discord.Client):
 # -------------------------------------------------------------------
 if __name__ == '__main__':
     print('Starting Discord message logger...')
-    print('WARNING: Automating user accounts is against Discord ToS')
-    print('Use at your own risk!\n')
     
     # Parse channel IDs
     channel_ids = parse_channel_ids(TARGET_INPUT_CHANNEL_IDS)

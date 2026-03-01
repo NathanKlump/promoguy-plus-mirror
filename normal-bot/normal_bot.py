@@ -25,6 +25,8 @@ TARGET_OUTPUT_CHANNEL_IDS = [
     if cid.strip().isdigit()
 ]
 FLASK_PORT = int(os.getenv("FLASK_PORT", "5001"))  # default to 5001 if not set
+LINK_FORWARD_CHANNEL_ID = os.getenv("LINK_FORWARD_CHANNEL_ID", "")
+LINK_FORWARD_CHANNEL_ID = int(LINK_FORWARD_CHANNEL_ID) if LINK_FORWARD_CHANNEL_ID.isdigit() else None
 
 # -------------------------------------------------------------------
 # Flask setup
@@ -179,6 +181,7 @@ async def download_attachment(session, attachment):
 
 async def send_to_discord_channel(channel, message, files, embeds):
     """Send message to a single Discord channel with attachments and embeds"""
+    sent_messages = []
     try:
         # Split message if too long (Discord has 2000 char limit)
         msg_to_send = message
@@ -194,34 +197,46 @@ async def send_to_discord_channel(channel, message, files, embeds):
             
             # Limit files to 10 per message (Discord limit)
             if len(files) <= 10:
-                await channel.send(
+                sent_msg = await channel.send(
                     content=msg_to_send if msg_to_send.strip() else None,
                     files=files,
                     embeds=embeds_to_send
                 )
+                if sent_msg:
+                    sent_messages.append(sent_msg)
             else:
                 # Send first batch with message and embeds
-                await channel.send(
+                sent_msg = await channel.send(
                     content=msg_to_send if msg_to_send.strip() else None,
                     files=files[:10],
                     embeds=embeds_to_send
                 )
+                if sent_msg:
+                    sent_messages.append(sent_msg)
                 # Send remaining files in batches
                 for i in range(10, len(files), 10):
                     batch = files[i:i+10]
-                    await channel.send(files=batch)
+                    sent_msg = await channel.send(files=batch)
+                    if sent_msg:
+                        sent_messages.append(sent_msg)
             
             # Send remaining embeds if any
             if remaining_embeds:
                 for i in range(0, len(remaining_embeds), 10):
                     batch = remaining_embeds[i:i+10]
-                    await channel.send(embeds=batch)
+                    sent_msg = await channel.send(embeds=batch)
+                    if sent_msg:
+                        sent_messages.append(sent_msg)
         else:
             # Just send the text message
-            await channel.send(msg_to_send)
-            
+            sent_msg = await channel.send(msg_to_send)
+            if sent_msg:
+                sent_messages.append(sent_msg)
+                
     except Exception as e:
         print(f'Error sending to Discord channel {channel.id}: {e}')
+    
+    return sent_messages
 
 
 async def send_to_discord_channels(message, attachments=None, embeds=None):
@@ -249,6 +264,13 @@ async def send_to_discord_channels(message, attachments=None, embeds=None):
                 print(f'Error creating embed: {e}')
     
     # Send to each channel
+    forward_channel = None
+    if LINK_FORWARD_CHANNEL_ID:
+        forward_channel = client.get_channel(LINK_FORWARD_CHANNEL_ID)
+        if not forward_channel:
+            print(f'Link forward channel {LINK_FORWARD_CHANNEL_ID} not found')
+    
+    all_sent_messages = []
     for channel_id in TARGET_OUTPUT_CHANNEL_IDS:
         channel = client.get_channel(channel_id)
         if not channel:
@@ -264,7 +286,17 @@ async def send_to_discord_channels(message, attachments=None, embeds=None):
                 file.fp.seek(0)
                 channel_files.append(discord.File(file.fp, filename=file.filename))
         
-        await send_to_discord_channel(channel, message, channel_files, discord_embeds)
+        sent_messages = await send_to_discord_channel(channel, message, channel_files, discord_embeds)
+        all_sent_messages.extend(sent_messages)
+        
+        # Forward to link channel if configured
+        if forward_channel and sent_messages:
+            for sent_msg in sent_messages:
+                try:
+                    await sent_msg.forward(forward_channel)
+                    print(f'[LINK FORWARD] Message forwarded to #{forward_channel.name}')
+                except Exception as e:
+                    print(f'Error forwarding message: {e}')
 
 
 @client.event
@@ -280,6 +312,12 @@ async def on_ready():
                 print(f'  - Channel ID {channel_id} (not found)')
     else:
         print('Warning: No output channels configured')
+    if LINK_FORWARD_CHANNEL_ID:
+        channel = client.get_channel(LINK_FORWARD_CHANNEL_ID)
+        if channel:
+            print(f'Link forward channel: #{channel.name} (ID: {LINK_FORWARD_CHANNEL_ID})')
+        else:
+            print(f'Link forward channel: ID {LINK_FORWARD_CHANNEL_ID} (not found)')
     print('-' * 50)
 
 
