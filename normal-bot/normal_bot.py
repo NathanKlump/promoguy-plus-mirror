@@ -41,6 +41,25 @@ intents.message_content = True
 intents.messages = True
 client = discord.Client(intents=intents)
 
+def contains_link(content, embeds):
+    """Check if content or embeds contain any links"""
+    url_pattern = re.compile(r'https?://\S+', re.IGNORECASE)
+    
+    if content and url_pattern.search(content):
+        return True
+    
+    if embeds:
+        for embed in embeds:
+            if isinstance(embed, dict):
+                if embed.get('url'):
+                    return True
+                description = embed.get('description', '')
+                if description and url_pattern.search(description):
+                    return True
+    
+    return False
+
+
 def create_discord_embed(embed_data):
     """Convert embed data dict to Discord Embed object"""
     embed = discord.Embed()
@@ -145,7 +164,7 @@ def receive_message():
         # Send to Discord channels if configured
         if TARGET_OUTPUT_CHANNEL_IDS:
             asyncio.run_coroutine_threadsafe(
-                send_to_discord_channels(formatted_message, attachments, embeds),
+                send_to_discord_channels(formatted_message, attachments, embeds, content),
                 client.loop
             )
 
@@ -239,7 +258,7 @@ async def send_to_discord_channel(channel, message, files, embeds):
     return sent_messages
 
 
-async def send_to_discord_channels(message, attachments=None, embeds=None):
+async def send_to_discord_channels(message, attachments=None, embeds=None, original_content=None):
     """Send message to all configured Discord channels with attachments and embeds"""
     if not TARGET_OUTPUT_CHANNEL_IDS:
         return
@@ -270,6 +289,8 @@ async def send_to_discord_channels(message, attachments=None, embeds=None):
         if not forward_channel:
             print(f'Link forward channel {LINK_FORWARD_CHANNEL_ID} not found')
     
+    should_forward = forward_channel and contains_link(original_content or '', embeds)
+    
     all_sent_messages = []
     for channel_id in TARGET_OUTPUT_CHANNEL_IDS:
         channel = client.get_channel(channel_id)
@@ -289,8 +310,8 @@ async def send_to_discord_channels(message, attachments=None, embeds=None):
         sent_messages = await send_to_discord_channel(channel, message, channel_files, discord_embeds)
         all_sent_messages.extend(sent_messages)
         
-        # Forward to link channel if configured
-        if forward_channel and sent_messages:
+        # Forward to link channel if configured and message contains a link
+        if should_forward and sent_messages:
             for sent_msg in sent_messages:
                 try:
                     await sent_msg.forward(forward_channel)
