@@ -133,6 +133,10 @@ class MessageLogger(discord.Client):
         print('-' * 50)
         print('Listening for messages...\n')
 
+    async def on_disconnect(self):
+        print('ERROR: Bot disconnected from Discord!')
+        await self.close()
+
     async def on_message(self, message):
         # Only log messages from target channels
         if message.channel.id not in self.target_channel_ids:

@@ -1,4 +1,5 @@
 import os
+import sys
 import discord
 from flask import Flask, request, jsonify
 import threading
@@ -9,6 +10,8 @@ from io import BytesIO
 from pathlib import Path
 from dotenv import load_dotenv
 import re
+import atexit
+import time
 
 # -------------------------------------------------------------------
 # Load environment variables
@@ -32,6 +35,31 @@ LINK_FORWARD_CHANNEL_ID = int(LINK_FORWARD_CHANNEL_ID) if LINK_FORWARD_CHANNEL_I
 # Flask setup
 # -------------------------------------------------------------------
 app = Flask(__name__)
+
+
+@app.route('/shutdown', methods=['POST', 'GET'])
+def shutdown():
+    """Internal endpoint to trigger shutdown"""
+    shutdown_event.set()
+    return jsonify({'status': 'shutting_down'}), 200
+
+
+# Shutdown mechanism
+shutdown_event = threading.Event()
+unexpected_disconnect = False
+
+def graceful_shutdown(exit_code=1):
+    global unexpected_disconnect
+    unexpected_disconnect = True
+    print(f"\n[!] Discord bot disconnected! Shutting down... (exit code: {exit_code})")
+    shutdown_event.set()
+    time.sleep(0.5)
+    sys.exit(exit_code)
+
+@atexit.register
+def cleanup():
+    if unexpected_disconnect:
+        print("[!] Process terminated due to unexpected disconnect")
 
 # -------------------------------------------------------------------
 # Discord setup
@@ -322,6 +350,8 @@ async def send_to_discord_channels(message, attachments=None, embeds=None, origi
 
 @client.event
 async def on_ready():
+    global unexpected_disconnect
+    unexpected_disconnect = False
     print(f'Discord bot logged in as {client.user}')
     if TARGET_OUTPUT_CHANNEL_IDS:
         print(f'Output channels ({len(TARGET_OUTPUT_CHANNEL_IDS)}):')
@@ -342,9 +372,24 @@ async def on_ready():
     print('-' * 50)
 
 
+@client.event
+async def on_disconnect():
+    print("[!] Discord bot disconnected!")
+    graceful_shutdown(exit_code=1)
+
+
 def run_flask():
     """Run Flask server"""
-    app.run(host='0.0.0.0', port=FLASK_PORT, debug=False, use_reloader=False)
+    # Run Flask with threaded=True, checking shutdown_event periodically
+    def flask_worker():
+        while not shutdown_event.is_set():
+            app.run(host='0.0.0.0', port=FLASK_PORT, debug=False, use_reloader=False, threaded=True)
+            if not shutdown_event.is_set():
+                time.sleep(0.5)  # Brief pause before checking again
+
+    flask_thread = threading.Thread(target=flask_worker)
+    flask_thread.start()
+    return flask_thread
 
 
 def run_discord():
@@ -357,9 +402,17 @@ if __name__ == '__main__':
     print(f'Flask server will run on http://0.0.0.0:{FLASK_PORT}')
     print('-' * 50)
 
-    # Run Flask in a separate thread
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-
-    # Run Discord bot in main thread
+    flask_thread = run_flask()
     run_discord()
+
+    # Clean up Flask
+    print("[!] Shutting down Flask server...")
+    import urllib.request
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{FLASK_PORT}/shutdown", timeout=2)
+    except Exception:
+        pass
+    time.sleep(1)
+
+    print("[!] Exit complete.")
+    sys.exit(1 if unexpected_disconnect else 0)
