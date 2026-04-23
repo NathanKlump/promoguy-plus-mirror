@@ -1,14 +1,14 @@
 import os
 import sys
-import discord
-from flask import Flask, request, jsonify
+import discord # type: ignore[import]
+from flask import Flask, request, jsonify # type: ignore[import]
 import threading
 import asyncio
-import aiohttp
+import aiohttp # type: ignore[import]
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from dotenv import load_dotenv
+from dotenv import load_dotenv # type: ignore[import]
 import re
 import atexit
 import time
@@ -54,7 +54,7 @@ def graceful_shutdown(exit_code=1):
     print(f"\n[!] Discord bot disconnected! Shutting down... (exit code: {exit_code})")
     shutdown_event.set()
     time.sleep(0.5)
-    sys.exit(exit_code)
+    os._exit(exit_code)
 
 @atexit.register
 def cleanup():
@@ -343,7 +343,8 @@ async def send_to_discord_channels(message, attachments=None, embeds=None, origi
             for sent_msg in sent_messages:
                 try:
                     await sent_msg.forward(forward_channel)
-                    print(f'[LINK FORWARD] Message forwarded to #{forward_channel.name}')
+                    if forward_channel:
+                        print(f'[LINK FORWARD] Message forwarded to #{forward_channel.name}')
                 except Exception as e:
                     print(f'Error forwarding message: {e}')
 
