@@ -13,14 +13,16 @@ if __name__ == '__main__':
     print('-' * 50)
 
     flask_thread = flask_server.run()
-    discord_bot.run()
-
-    print("[!] Shutting down Flask server...")
     try:
-        urllib.request.urlopen(f"http://127.0.0.1:{config.FLASK_PORT}/shutdown", timeout=2)
-    except Exception:
-        pass
-    time.sleep(1)
+        discord_bot.run()
+    except SystemExit as e:
+        # Bot requested exit (due to disconnection or error)
+        print("[!] Shutting down Flask server...")
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{config.FLASK_PORT}/shutdown", timeout=2)
+        except Exception:
+            pass
+        time.sleep(1)
 
-    print("[!] Exit complete.")
-    sys.exit(1 if discord_bot.unexpected_disconnect else 0)
+        print("[!] Exit complete.")
+        sys.exit(e.code)

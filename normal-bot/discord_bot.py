@@ -3,6 +3,7 @@ import re
 import threading
 from datetime import datetime
 from io import BytesIO
+import sys
 
 import discord  # type: ignore[import]
 import aiohttp # type: ignore[import]
@@ -16,7 +17,6 @@ intents.messages = True
 client = discord.Client(intents=intents)
 
 shutdown_event = threading.Event()
-unexpected_disconnect = False
 
 
 def contains_link(content, embeds):
@@ -209,17 +209,8 @@ async def send_to_discord_channels(message, attachments=None, embeds=None, origi
                     print(f'Error forwarding message: {e}')
 
 
-def graceful_shutdown(exit_code=1):
-    global unexpected_disconnect
-    unexpected_disconnect = True
-    print(f"\n[!] Discord bot disconnected! Shutting down... (exit code: {exit_code})")
-    shutdown_event.set()
-
-
 @client.event
 async def on_ready():
-    global unexpected_disconnect
-    unexpected_disconnect = False
     print(f'Discord bot logged in as {client.user}')
     if config.TARGET_OUTPUT_CHANNEL_IDS:
         print(f'Output channels ({len(config.TARGET_OUTPUT_CHANNEL_IDS)}):')
@@ -241,10 +232,22 @@ async def on_ready():
 
 
 @client.event
+async def on_resumed():
+    print("[✓] Discord bot reconnected successfully.")
+
+
+@client.event
 async def on_disconnect():
-    print("[!] Discord bot disconnected!")
-    graceful_shutdown(exit_code=1)
+    print("[!] Discord bot disconnected - waiting for reconnect...")
 
 
 def run():
-    client.run(config.DISCORD_TOKEN)
+    try:
+        client.run(config.DISCORD_TOKEN)
+    except Exception as e:
+        print(f"[!] Discord bot fatal error: {e}")
+        sys.exit(1)
+    else:
+        # client.run() returned cleanly — still exit so systemd restarts it
+        print("[!] Discord client exited.")
+        sys.exit(1)
