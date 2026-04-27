@@ -17,6 +17,7 @@ intents.messages = True
 client = discord.Client(intents=intents)
 
 shutdown_event = threading.Event()
+ready_event = threading.Event()
 
 
 def contains_link(content, embeds):
@@ -211,6 +212,7 @@ async def send_to_discord_channels(message, attachments=None, embeds=None, origi
 
 @client.event
 async def on_ready():
+    ready_event.set()
     print(f'Discord bot logged in as {client.user}')
     if config.TARGET_OUTPUT_CHANNEL_IDS:
         print(f'Output channels ({len(config.TARGET_OUTPUT_CHANNEL_IDS)}):')

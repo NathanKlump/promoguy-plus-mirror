@@ -1,4 +1,5 @@
 import sys
+import threading
 import time
 import urllib.request
 
@@ -12,9 +13,19 @@ if __name__ == '__main__':
     print(f'Flask server will run on http://0.0.0.0:{config.FLASK_PORT}')
     print('-' * 50)
 
+    discord_thread = threading.Thread(target=discord_bot.run)
+    discord_thread.start()
+    
+    print("Waiting for bot to connect...")
+    if not discord_bot.ready_event.wait(timeout=30):
+        print("WARNING: Bot didn't connect in time, starting Flask anyway")
+    else:
+        print("Bot connected, starting Flask")
+    
     flask_thread = flask_server.run()
+    
     try:
-        discord_bot.run()
+        discord_thread.join()
     except SystemExit as e:
         # Bot requested exit (due to disconnection or error)
         print("[!] Shutting down Flask server...")

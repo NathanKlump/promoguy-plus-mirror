@@ -17,8 +17,31 @@ def shutdown():
     return jsonify({'status': 'shutting_down'}), 200
 
 
+@app.route('/health', methods=['GET'])
+def health():
+    is_ready = discord_bot.ready_event.is_set()
+    loop = getattr(discord_bot.client, 'loop', None)
+    loop_ready = loop is not None and str(loop) != 'MISSING'
+    
+    if is_ready and loop_ready:
+        return jsonify({'status': 'healthy', 'bot': 'ready'}), 200
+    elif is_ready:
+        return jsonify({'status': 'degraded', 'bot': 'ready but loop not init'}), 200
+    else:
+        return jsonify({'status': 'unhealthy', 'bot': 'not ready'}), 503
+
+
 @app.route('/receive_message', methods=['POST'])
 def receive_message():
+    if not discord_bot.ready_event.is_set():
+        print('[WARNING] Message received before bot ready, rejecting')
+        return jsonify({'status': 'error', 'message': 'Bot not ready'}), 503
+    
+    loop = discord_bot.client.loop
+    if loop is None or str(loop) == 'MISSING':
+        print('[WARNING] Message received but loop not initialized, rejecting')
+        return jsonify({'status': 'error', 'message': 'Bot event loop not initialized'}), 503
+    
     try:
         data = request.json
 
@@ -61,7 +84,7 @@ def receive_message():
         if config.TARGET_OUTPUT_CHANNEL_IDS:
             asyncio.run_coroutine_threadsafe(
                 discord_bot.send_to_discord_channels(formatted_message, attachments, embeds, content),
-                discord_bot.client.loop
+                loop
             )
 
         return jsonify({'status': 'success', 'message': 'Message received'}), 200
