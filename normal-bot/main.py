@@ -18,7 +18,8 @@ if __name__ == '__main__':
     
     print("Waiting for bot to connect...")
     if not discord_bot.ready_event.wait(timeout=30):
-        print("WARNING: Bot didn't connect in time, starting Flask anyway")
+        print("ERROR: Bot failed to connect in time, terminating...")
+        sys.exit(1)
     else:
         print("Bot connected, starting Flask")
     
