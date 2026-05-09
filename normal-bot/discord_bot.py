@@ -39,49 +39,53 @@ def contains_link(content, embeds):
 
 
 def create_discord_embed(embed_data):
-    embed = discord.Embed()
+    try:
+        embed = discord.Embed()
 
-    if 'title' in embed_data:
-        embed.title = embed_data['title']
-    if 'description' in embed_data:
-        embed.description = embed_data['description']
-    if 'url' in embed_data:
-        embed.url = embed_data['url']
-    if 'color' in embed_data:
-        embed.color = discord.Color(embed_data['color'])
-    if 'timestamp' in embed_data:
-        embed.timestamp = datetime.fromisoformat(embed_data['timestamp'].replace('Z', '+00:00'))
+        if 'title' in embed_data:
+            embed.title = embed_data['title']
+        if 'description' in embed_data:
+            embed.description = embed_data['description']
+        if 'url' in embed_data:
+            embed.url = embed_data['url']
+        if 'color' in embed_data:
+            embed.color = discord.Color(embed_data['color'])
+        if 'timestamp' in embed_data:
+            embed.timestamp = datetime.fromisoformat(embed_data['timestamp'].replace('Z', '+00:00'))
 
-    if 'footer' in embed_data:
-        footer = embed_data['footer']
-        embed.set_footer(
-            text=footer.get('text', ''),
-            icon_url=footer.get('icon_url')
-        )
-
-    if 'image' in embed_data:
-        embed.set_image(url=embed_data['image']['url'])
-
-    if 'thumbnail' in embed_data:
-        embed.set_thumbnail(url=embed_data['thumbnail']['url'])
-
-    if 'author' in embed_data:
-        author = embed_data['author']
-        embed.set_author(
-            name=author.get('name', ''),
-            url=author.get('url'),
-            icon_url=author.get('icon_url')
-        )
-
-    if 'fields' in embed_data:
-        for field in embed_data['fields']:
-            embed.add_field(
-                name=field.get('name', '\u200b'),
-                value=field.get('value', '\u200b'),
-                inline=field.get('inline', False)
+        if 'footer' in embed_data:
+            footer = embed_data['footer']
+            embed.set_footer(
+                text=footer.get('text', ''),
+                icon_url=footer.get('icon_url')
             )
 
-    return embed
+        if 'image' in embed_data:
+            embed.set_image(url=embed_data['image']['url'])
+
+        if 'thumbnail' in embed_data:
+            embed.set_thumbnail(url=embed_data['thumbnail']['url'])
+
+        if 'author' in embed_data:
+            author = embed_data['author']
+            embed.set_author(
+                name=author.get('name', ''),
+                url=author.get('url'),
+                icon_url=author.get('icon_url')
+            )
+
+        if 'fields' in embed_data:
+            for field in embed_data['fields']:
+                embed.add_field(
+                    name=field.get('name', '\u200b'),
+                    value=field.get('value', '\u200b'),
+                    inline=field.get('inline', False)
+                )
+
+        return embed
+    except Exception as e:
+        print(f'Error creating embed: {e}')
+        return None
 
 
 async def download_attachment(session, attachment):
@@ -156,58 +160,59 @@ async def send_to_discord_channel(channel, message, files, embeds):
 
 
 async def send_to_discord_channels(message, attachments=None, embeds=None, original_content=None):
-    if not config.TARGET_OUTPUT_CHANNEL_IDS:
-        return
+    try:
+        if not config.TARGET_OUTPUT_CHANNEL_IDS:
+            return
 
-    files_data = []
-    if attachments:
-        async with aiohttp.ClientSession() as session:
-            for attachment in attachments:
-                file = await download_attachment(session, attachment)
-                if file:
-                    files_data.append(file)
+        files_data = []
+        if attachments:
+            async with aiohttp.ClientSession() as session:
+                for attachment in attachments:
+                    file = await download_attachment(session, attachment)
+                    if file:
+                        files_data.append(file)
 
-    discord_embeds = []
-    if embeds:
-        for embed_data in embeds:
-            try:
+        discord_embeds = []
+        if embeds:
+            for embed_data in embeds:
                 discord_embed = create_discord_embed(embed_data)
-                discord_embeds.append(discord_embed)
-            except Exception as e:
-                print(f'Error creating embed: {e}')
+                if discord_embed:
+                    discord_embeds.append(discord_embed)
 
-    forward_channel = None
-    if config.LINK_FORWARD_CHANNEL_ID:
-        forward_channel = client.get_channel(config.LINK_FORWARD_CHANNEL_ID)
-        if not forward_channel:
-            print(f'Link forward channel {config.LINK_FORWARD_CHANNEL_ID} not found')
+        forward_channel = None
+        if config.LINK_FORWARD_CHANNEL_ID:
+            forward_channel = client.get_channel(config.LINK_FORWARD_CHANNEL_ID)
+            if not forward_channel:
+                print(f'Link forward channel {config.LINK_FORWARD_CHANNEL_ID} not found')
 
-    should_forward = forward_channel and contains_link(original_content or '', embeds)
+        should_forward = forward_channel and contains_link(original_content or '', embeds)
 
-    all_sent_messages = []
-    for channel_id in config.TARGET_OUTPUT_CHANNEL_IDS:
-        channel = client.get_channel(channel_id)
-        if not channel:
-            print(f'Channel {channel_id} not found')
-            continue
+        all_sent_messages = []
+        for channel_id in config.TARGET_OUTPUT_CHANNEL_IDS:
+            channel = client.get_channel(channel_id)
+            if not channel:
+                print(f'Channel {channel_id} not found')
+                continue
 
-        channel_files = []
-        if files_data:
-            for file in files_data:
-                file.fp.seek(0)
-                channel_files.append(discord.File(file.fp, filename=file.filename))
+            channel_files = []
+            if files_data:
+                for file in files_data:
+                    file.fp.seek(0)
+                    channel_files.append(discord.File(file.fp, filename=file.filename))
 
-        sent_messages = await send_to_discord_channel(channel, message, channel_files, discord_embeds)
-        all_sent_messages.extend(sent_messages)
+            sent_messages = await send_to_discord_channel(channel, message, channel_files, discord_embeds)
+            all_sent_messages.extend(sent_messages)
 
-        if should_forward and sent_messages:
-            for sent_msg in sent_messages:
-                try:
-                    await sent_msg.forward(forward_channel)
-                    if forward_channel:
-                        print(f'[LINK FORWARD] Message forwarded to #{forward_channel.name}')
-                except Exception as e:
-                    print(f'Error forwarding message: {e}')
+            if should_forward and sent_messages:
+                for sent_msg in sent_messages:
+                    try:
+                        await sent_msg.forward(forward_channel)
+                        if forward_channel:
+                            print(f'[LINK FORWARD] Message forwarded to #{forward_channel.name}')
+                    except Exception as e:
+                        print(f'Error forwarding message: {e}')
+    except Exception as e:
+        print(f'Error in send_to_discord_channels: {e}')
 
 
 @client.event
